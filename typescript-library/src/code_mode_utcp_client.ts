@@ -1,5 +1,25 @@
 import { UtcpClient, Tool, JsonSchema, UtcpClientConfig } from '@utcp/sdk';
 import ivm from 'isolated-vm';
+import { transform } from 'sucrase';
+
+/**
+ * Structured error information for execution failures
+ */
+interface ExecutionError {
+  message: string;
+  type: 'execution' | 'timeout' | 'syntax' | 'memory' | 'validation';
+  code?: string;
+  stack?: string;
+}
+
+/**
+ * Result of code chain execution
+ */
+interface CallToolChainResult {
+  result?: any;
+  logs: string[];
+  error?: ExecutionError;
+}
 
 /**
  * CodeModeUtcpClient extends UtcpClient to provide TypeScript code execution capabilities.
@@ -181,7 +201,7 @@ ${interfaces.join('\n\n')}`;
     code: string,
     timeout: number = 30000,
     memoryLimit: number = 128
-  ): Promise<{result: any, logs: string[]}> {
+  ): Promise<CallToolChainResult> {
     const tools = await this.getTools();
     const logs: string[] = [];
 
@@ -299,7 +319,30 @@ ${interfaces.join('\n\n')}`;
       resultPromise.catch(() => {});
       timeoutPromise.catch(() => {});
 
-      const script = await isolate.compileScript(wrappedCode);
+      // Step 1: Transpile TypeScript to JavaScript
+      let jsCode: string;
+      try {
+        const transpileResult = transform(wrappedCode, {
+          transforms: ['typescript']
+        });
+        jsCode = transpileResult.code;
+      } catch (transpileError) {
+        const errorMessage = transpileError instanceof Error 
+          ? transpileError.message 
+          : String(transpileError);
+        logs.push(`[ERROR] Code execution failed: ${errorMessage}`);
+        return { 
+          result: null,
+          logs,
+          error: {
+            message: errorMessage,
+            type: 'syntax'
+          }
+        };
+      }
+
+      // Step 2: Compile JavaScript
+      const script = await isolate.compileScript(jsCode);
       // Kick off the async IIFE. `script.run` returns once the synchronous portion
       // of the wrapper completes (i.e. immediately, since the body is async).
       // `script.run` may itself reject if the isolate refuses to surface the
@@ -320,11 +363,32 @@ ${interfaces.join('\n\n')}`;
       return { result, logs };
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
+      const errorStack = error instanceof Error ? error.stack?.split('\n').slice(0, 3).join('\n') : undefined;
+      
+      // Categorize error type
+      let errorType: ExecutionError['type'] = 'execution';
+      if (errorMessage.includes('timeout') || errorMessage.includes('Timeout')) {
+        errorType = 'timeout';
+      } else if (errorMessage.includes('SyntaxError') || errorMessage.includes('Unexpected token')) {
+        errorType = 'syntax';
+      } else if (errorMessage.includes('memory') || errorMessage.includes('Memory')) {
+        errorType = 'memory';
+      }
+      
       // Push into the live array rather than returning a copy: `finally` runs
       // AFTER this return value is built, and the abandoned-call warnings it
       // writes (see `releaseChain`) must reach the caller too.
       logs.push(`[ERROR] Code execution failed: ${errorMessage}`);
-      return { result: null, logs };
+      
+      return { 
+        result: null,
+        logs,
+        error: {
+          message: errorMessage,
+          type: errorType,
+          stack: errorStack
+        }
+      };
     } finally {
       if (timeoutHandle) clearTimeout(timeoutHandle);
       // Unblock any tool call still parked in `applySyncPromise` BEFORE

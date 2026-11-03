@@ -772,6 +772,84 @@ describe('CodeModeUtcpClient', () => {
     expect(logs[2]).toBe('[WARN] This is a warning');
     expect(logs[3]).toBe('[INFO] This is info');
   });
+
+  test('should execute code with type annotations', async () => {
+    const code = `
+      const x: number = 42;
+      const y: string = "hello";
+      return { x, y };
+    `;
+    const { result } = await client.callToolChain(code);
+    expect(result).toEqual({ x: 42, y: "hello" });
+  });
+
+  test('should execute interfaces', async () => {
+    const code = `
+      interface User {
+        name: string;
+        age: number;
+      }
+      const user: User = { name: "Alice", age: 30 };
+      return user;
+    `;
+    const { result } = await client.callToolChain(code);
+    expect(result.name).toBe("Alice");
+    expect(result.age).toBe(30);
+  });
+
+  test('should handle generic types', async () => {
+    const code = `
+      function identity<T>(x: T): T { return x; }
+      return identity(42);
+    `;
+    const { result } = await client.callToolChain(code);
+    expect(result).toBe(42);
+  });
+
+  test('should handle async/await with type annotations', async () => {
+    const code = `
+      async function fetchData(): Promise<{data: string}> {
+        return { data: "test" };
+      }
+      const result = await fetchData();
+      return result;
+    `;
+    const { result } = await client.callToolChain(code);
+    expect(result.data).toBe("test");
+  });
+
+  test('should transpile TypeScript without type errors', async () => {
+    // Type mismatches are valid at runtime (types are erased)
+    // This just verifies the transpilation works
+    const code = `const x: number = "not a number"; return x;`;
+    const { result } = await client.callToolChain(code);
+    expect(result).toBe("not a number");
+  });
+
+  test('should handle try/catch with type annotations', async () => {
+    const code = `
+      let error: Error | null = null;
+      try { 
+        throw new Error("test"); 
+      } catch (err: any) { 
+        error = err; 
+      }
+      return error ? error.message : null;
+    `;
+    const { result } = await client.callToolChain(code);
+    expect(result).toBe("test");
+  });
+
+  test('should execute union types', async () => {
+    const code = `
+      type ID = string | number;
+      const id1: ID = "uuid-123";
+      const id2: ID = 42;
+      return [id1, id2];
+    `;
+    const { result } = await client.callToolChain(code);
+    expect(result).toEqual(["uuid-123", 42]);
+  });
 });
 
 // Export for potential manual testing

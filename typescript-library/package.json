@@ -43,7 +43,9 @@
       "default": "./dist/index.js"
     }
   },
-  "dependencies": {},
+  "dependencies": {
+    "sucrase": "^3.35.0"
+  },
   "peerDependencies": {
     "@utcp/sdk": "^1.1.0",
     "isolated-vm": "^6.0.0"
