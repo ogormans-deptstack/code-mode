@@ -289,7 +289,13 @@ Remember: The power of this system comes from combining multiple tools in sophis
     }, async (input) => {
         const client = await initializeUtcpClient();
         try {
-            const { result, logs } = await client.callToolChain(input.code, input.timeout);
+            const { result, logs, error } = await client.callToolChain(input.code, input.timeout);
+            
+            // If an error occurred, return it immediately
+            if (error) {
+                const jsonContent: string = JSON.stringify({ success: false, error, logs });
+                return { isError: true, content: [{ type: "text", text: jsonContent }] };
+            }
             
             function truncateText(text: string): string {
                 if (text.length <= input.max_output_size) {
