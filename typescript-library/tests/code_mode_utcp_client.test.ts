@@ -772,6 +772,32 @@ describe('CodeModeUtcpClient', () => {
     expect(logs[2]).toBe('[WARN] This is a warning');
     expect(logs[3]).toBe('[INFO] This is info');
   });
+
+  test('should include error field with type on syntax error', async () => {
+    const result = await client.callToolChain('invalid syntax here');
+    expect(result.error).toBeDefined();
+    expect(result.error?.type).toBe('syntax');
+    expect(result.error?.message).toBeTruthy();
+  });
+
+  test('should include error field with type on timeout', async () => {
+    const result = await client.callToolChain('while(true){}', 100);
+    expect(result.error).toBeDefined();
+    expect(result.error?.type).toBe('timeout');
+  });
+
+  test('should include error field with type on execution error', async () => {
+    const result = await client.callToolChain('throw new Error("test")');
+    expect(result.error).toBeDefined();
+    expect(result.error?.type).toBe('execution');
+    expect(result.error?.message).toContain('test');
+  });
+
+  test('should not have error field on success', async () => {
+    const result = await client.callToolChain('return 42');
+    expect(result.result).toBe(42);
+    expect(result.error).toBeUndefined();
+  });
 });
 
 // Export for potential manual testing

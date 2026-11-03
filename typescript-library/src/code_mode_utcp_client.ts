@@ -2,6 +2,25 @@ import { UtcpClient, Tool, JsonSchema, UtcpClientConfig } from '@utcp/sdk';
 import ivm from 'isolated-vm';
 
 /**
+ * Structured error information for execution failures
+ */
+interface ExecutionError {
+  message: string;
+  type: 'execution' | 'timeout' | 'syntax' | 'memory' | 'validation';
+  code?: string;
+  stack?: string;
+}
+
+/**
+ * Result of code chain execution
+ */
+interface CallToolChainResult {
+  result?: any;
+  logs: string[];
+  error?: ExecutionError;
+}
+
+/**
  * CodeModeUtcpClient extends UtcpClient to provide TypeScript code execution capabilities.
  * This allows executing TypeScript code that can directly call registered tools as functions.
  */
@@ -181,7 +200,7 @@ ${interfaces.join('\n\n')}`;
     code: string,
     timeout: number = 30000,
     memoryLimit: number = 128
-  ): Promise<{result: any, logs: string[]}> {
+  ): Promise<CallToolChainResult> {
     const tools = await this.getTools();
     const logs: string[] = [];
 
@@ -320,11 +339,32 @@ ${interfaces.join('\n\n')}`;
       return { result, logs };
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
+      const errorStack = error instanceof Error ? error.stack?.split('\n').slice(0, 3).join('\n') : undefined;
+      
+      // Categorize error type
+      let errorType: ExecutionError['type'] = 'execution';
+      if (errorMessage.includes('timeout') || errorMessage.includes('Timeout')) {
+        errorType = 'timeout';
+      } else if (errorMessage.includes('SyntaxError') || errorMessage.includes('Unexpected token')) {
+        errorType = 'syntax';
+      } else if (errorMessage.includes('memory') || errorMessage.includes('Memory')) {
+        errorType = 'memory';
+      }
+      
       // Push into the live array rather than returning a copy: `finally` runs
       // AFTER this return value is built, and the abandoned-call warnings it
       // writes (see `releaseChain`) must reach the caller too.
       logs.push(`[ERROR] Code execution failed: ${errorMessage}`);
-      return { result: null, logs };
+      
+      return { 
+        result: null,
+        logs,
+        error: {
+          message: errorMessage,
+          type: errorType,
+          stack: errorStack
+        }
+      };
     } finally {
       if (timeoutHandle) clearTimeout(timeoutHandle);
       // Unblock any tool call still parked in `applySyncPromise` BEFORE
